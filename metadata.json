@@ -1,0 +1,6 @@
+{
+  "name": "Mặc Hương Các — Studio Dịch Truyện Chữ Trung - Việt AI",
+  "description": "Studio biên dịch, biên tập và đọc truyện chữ Trung - Việt chuyên sâu bằng AI với quản lý System Instructions, Glossary tên riêng, xoay vòng 50 khóa chạy 10 luồng song song và xuất chuẩn W3C EPUB 3.3.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

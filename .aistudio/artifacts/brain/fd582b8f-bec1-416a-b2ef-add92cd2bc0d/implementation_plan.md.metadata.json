@@ -1,0 +1,6 @@
+{
+  "summary":  "Kế hoạch nâng cấp Mặc Hương Các Studio tích hợp các tính năng chọn lọc từ kiến trúc Xưởng Dịch Hán Việt: (1) Structured Output theo Block ID (TITLE, P0001...) đảm bảo khớp đoạn 100% và AI Dọn lỗi Hán/Anh theo đúng Block ID mục tiêu ({updates}); (2) Bộ Kiểm định QA mở rộng (chữ Hán, từ tiếng Anh, lệch số đoạn, tỷ lệ độ dài, lặp đoạn, dừng giữa câu) kết nối trực tiếp với thao tác Đưa đi Dịch lại hoặc Biên tập AI hàng loạt; (3) Tách 2 thư viện Preset Instructions (Preset Dịch & Preset Biên tập AI) chuẩn hóa theo Phụ lục A & B, và đặt bảng Glossary mặc định TẮT khi gửi request (chỉ gửi khi bật); (4) Công cụ Nhập bản dịch ngoài (.TXT) vào chương đang mở kèm Preview ghép đoạn; (5) Trình đọc tích hợp Highlight 3 màu, Ghi chú (Notes) và tự lưu vị trí đọc; (6) Sao lưu & Phục hồi toàn dự án (.ZIP Backup v5) và quản lý Ảnh bìa EPUB.",
+  "updatedAt":  "2026-10-25T02:30:36.973556633Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

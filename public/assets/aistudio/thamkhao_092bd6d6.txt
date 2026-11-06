@@ -1,0 +1,172 @@
+Đối với việc sử dụng AI để dịch truyện chữ Trung Quốc sang tiếng Việt, tôi khuyên bạn xây dựng một hệ thống thuật ngữ (Termbase) thay vì chỉ lập bảng đối chiếu từ tiếng Trung với tiếng Việt.
+
+Đặc biệt, nếu bạn dịch nhiều thể loại như tiên hiệp, huyền huyễn, võ hiệp, đô thị, ngôn tình, lịch sử, hệ thống, khoa huyễn, trò chơi, bảng thuật ngữ cần giúp AI giải quyết 4 vấn đề:
+
+- Dịch thống nhất tên riêng, danh xưng và thuật ngữ trong hàng nghìn chương.
+- Phân biệt các nghĩa khác nhau của cùng một từ tiếng Trung.
+- Tự điều chỉnh cách dịch theo thể loại, bối cảnh và quan hệ nhân vật.
+- Không tự ý thay đổi các thuật ngữ đã được xác nhận.
+
+Theo hướng dẫn quản lý thuật ngữ của Microsoft và tiêu chuẩn ISO 12616-1, một mục từ tốt cần chứa định nghĩa, ngữ cảnh, phân loại, cách sử dụng và thông tin quản lý, chứ không chỉ có cặp từ nguồn–đích.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://learn.microsoft.com\&sz=32)
+
+Microsoft Learn
+
++1
+
+
+
+## 1. Phân loại thuật ngữ thành 14 nhóm
+
+Đây là hệ thống phân loại tôi đề xuất để sử dụng chung cho nhiều thể loại truyện Trung Quốc.
+
+| Nhóm                           | Nội dung cần quản lý                                      | Ví dụ                                        |
+| ------------------------------ | --------------------------------------------------------- | -------------------------------------------- |
+| 1. Nhân vật                    | Tên thật, họ tên, biệt danh, đạo hiệu, tên giả, danh hiệu | 叶辰 → Diệp Thần                               |
+| 2. Danh xưng và xưng hô        | Vai vế, kính ngữ, chức danh, cách gọi theo quan hệ        | 师兄 → sư huynh, 前辈 → tiền bối                 |
+| 3. Tổ chức và thế lực          | Tông môn, gia tộc, bang phái, công ty, quân đội, quốc gia | 青云宗 → Thanh Vân Tông                         |
+| 4. Địa danh và không gian      | Thành trì, núi, bí cảnh, tinh cầu, thế giới, khu vực      | 秘境 → bí cảnh                                 |
+| 5. Cảnh giới và cấp bậc        | Cấp tu luyện, võ đạo, dị năng, nghề nghiệp, quân hàm      | 金丹 → Kim Đan                                 |
+| 6. Công pháp và kỹ năng        | Công pháp, chiêu thức, võ kỹ, phép thuật, kỹ năng game    | 九转玄功 → Cửu Chuyển Huyền Công                 |
+| 7. Vũ khí và trang bị          | Pháp bảo, thần binh, trang bị, máy móc, vật phẩm đặc biệt | 飞剑 → phi kiếm                                |
+| 8. Tài nguyên và vật phẩm      | Đan dược, linh thạch, nguyên liệu, tiền tệ, đạo cụ        | 灵石 → linh thạch                              |
+| 9. Chủng tộc và sinh vật       | Yêu thú, thần thú, quái vật, chủng tộc giả tưởng          | 妖兽 → yêu thú                                 |
+| 10. Hệ thống sức mạnh          | Linh khí, pháp lực, thuộc tính, quy luật, cơ chế sức mạnh | 灵气 → linh khí                                |
+| 11. Khái niệm văn hóa          | Đạo giáo, Phật giáo, phong tục, lễ nghi, chế độ cổ đại    | 因果 → nhân quả                                |
+| 12. Thành ngữ và cách nói      | Điển cố, thành ngữ, tiếng lóng, cách diễn đạt đặc trưng   | 打脸 → vả mặt / làm bẽ mặt                     |
+| 13. Thuật ngữ chuyên ngành     | Kinh tế, y học, pháp luật, quân sự, công nghệ, giải trí   | 人工智能 → trí tuệ nhân tạo                      |
+| 14. Thuật ngữ đặc thù tác phẩm | Khái niệm độc quyền, vật phẩm tự sáng tạo, luật hệ thống  | 天命值 → điểm thiên mệnh (nếu phù hợp ngữ cảnh) |
+
+Đối với truyện tiên hiệp, các nhóm nhân vật, tông môn, cảnh giới, kỹ năng, vật phẩm và danh xưng đặc biệt quan trọng. Đây cũng là những nhóm được ưu tiên trong cơ sở thuật ngữ của cộng đồng dịch truyện chữ Trung Quốc bằng máy.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://luciusshao.github.io\&sz=32)
+
+Chinese Webnovel MTL Knowledge Base
+
++1
+
+
+
+## 2. Mỗi thuật ngữ cần lưu những trường thông tin nào?
+
+Tôi đề xuất 16 trường dữ liệu, chia thành 6 nhóm chức năng.
+
+| Nhóm thông tin | Các trường dữ liệu                         | Mục đích                                                       |
+| -------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| Định danh      | `term_id`, `source_zh`, `target_vi`        | Nhận diện và cố định bản dịch                                  |
+| Phân loại      | `category`, `subcategory`, `genre`         | Xác định thuật ngữ thuộc nhóm và thể loại nào                  |
+| Ngữ nghĩa      | `definition`, `context`, `usage_condition` | Giải thích nghĩa và điều kiện áp dụng                          |
+| Biến thể       | `aliases`, `forbidden_translations`        | Quản lý tên gọi khác và bản dịch không được sử dụng            |
+| Phạm vi        | `scope`, `novel_id`, `first_chapter`       | Phân biệt thuật ngữ dùng chung với thuật ngữ riêng từng truyện |
+| Quản trị       | `status`, `priority`                       | Xác định bản dịch đã duyệt và độ ưu tiên                       |
+
+Các trường trên là thiết kế đề xuất dành riêng cho việc dịch tiểu thuyết bằng AI, không phải danh sách bắt buộc của một tiêu chuẩn ISO.
+
+### Ví dụ về bảng thuật ngữ có ngữ cảnh
+
+| Tiếng Trung | Bản dịch      | Loại      | Quy tắc ngữ cảnh                                                    |
+| ----------- | ------------- | --------- | ------------------------------------------------------------------- |
+| 元婴          | Nguyên Anh    | Cảnh giới | Dùng khi chỉ cảnh giới hoặc thực thể tu luyện theo thiết lập truyện |
+| 师兄          | Sư huynh      | Xưng hô   | Chỉ người đồng môn có vai vế cao hơn                                |
+| 小姐          | Tiểu thư      | Xưng hô   | Dùng trong bối cảnh gia tộc hoặc xã hội cổ đại phù hợp              |
+| 小姐          | Cô / quý cô   | Xưng hô   | Dùng trong bối cảnh hiện đại, tùy tình huống                        |
+| 总裁          | Tổng tài      | Chức danh | Có thể dùng theo văn phong ngôn tình tổng tài                       |
+| 总裁          | Tổng giám đốc | Chức danh | Dùng khi phù hợp chức vụ thực tế trong bối cảnh kinh doanh          |
+
+Điểm rất quan trọng là không ép mỗi từ tiếng Trung chỉ có một bản dịch tiếng Việt trong mọi hoàn cảnh. Một từ có nhiều nghĩa phải được lưu thành các mục từ riêng theo khái niệm và điều kiện sử dụng. Microsoft cũng khuyến nghị tách các khái niệm khi cùng một cách viết có nhiều nghĩa.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://learn.microsoft.com\&sz=32)
+
+Microsoft Learn
+
+
+
+## 3. Nên tổ chức bảng theo 3 cấp phạm vi
+
+Cấp 1 — Thuật ngữ dùng chung
+
+Các thuật ngữ có thể tái sử dụng ở nhiều tác phẩm: sư huynh, tiền bối, linh khí, tông môn, bí cảnh, v.v.
+
+Cấp 2 — Thuật ngữ theo thể loại
+
+Tiên hiệp có Kim Đan, Nguyên Anh; đô thị có chức vụ và thuật ngữ doanh nghiệp; game có nhiệm vụ, phó bản và chỉ số nhân vật.
+
+Cấp 3 — Thuật ngữ riêng từng tác phẩm
+
+Nhân vật, tổ chức, hệ thống sức mạnh, cấp bậc, vật phẩm và các cách đặt tên chỉ tồn tại trong tác phẩm đó.
+
+Nguyên tắc ưu tiên: Thuật ngữ riêng của truyện được xác nhận rõ ràng sẽ có quyền ưu tiên cao hơn thuật ngữ thể loại và thuật ngữ dùng chung.
+
+Ví dụ, cùng là `筑基`, bản dịch thông dụng là Trúc Cơ. Nhưng nếu một tác phẩm thiết lập hệ thống tu luyện riêng, AI phải sử dụng quy ước của tác phẩm đó, không tự áp đặt hệ thống tiên hiệp phổ biến.
+
+## 4. Ngoài bảng thuật ngữ, AI còn cần những loại dữ liệu nào?
+
+Để dịch truyện dài hiệu quả, tôi đề xuất tách 4 cơ sở dữ liệu, vì không phải mọi thông tin đều là thuật ngữ.
+
+| Cơ sở dữ liệu           | Dữ liệu quản lý                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| Glossary / Termbase     | Từ tiếng Trung, bản dịch, định nghĩa, điều kiện sử dụng                          |
+| Character Database      | Giới tính, thân phận, quan hệ, danh hiệu, cách xưng hô, sự thay đổi theo chương  |
+| Worldbuilding Database  | Hệ thống cảnh giới, thứ bậc, tổ chức, địa lý, quy tắc thế giới                   |
+| Translation Style Guide | Quy tắc Hán Việt, cách dùng đại từ, ngôi kể, giọng văn, dấu câu, mức độ Việt hóa |
+
+Sự tách biệt giữa thuật ngữ và quy tắc văn phong cũng phù hợp với thực hành quản lý bản dịch chuyên nghiệp: glossary quản lý khái niệm và cách gọi, còn style guide quản lý giọng điệu và cách diễn đạt.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.locize.com\&sz=32)
+
+Locize
+
+
+
+Riêng với Character Database, nên có trường `valid_from_chapter` để theo dõi nhân vật đổi thân phận, tu vi hoặc quan hệ mà không làm AI áp dụng thông tin của chương tương lai vào chương trước.
+
+## 5. Cách cung cấp dữ liệu cho AI khi dịch
+
+Không nên đưa toàn bộ hàng nghìn thuật ngữ vào mỗi lần dịch. Thay vào đó, xây dựng quy trình:
+
+Văn bản gốc tiếng Trung
+
+Trích xuất tên riêng và thuật ngữ xuất hiện
+
+Tra cứu dữ liệu liên quan
+
+Thuật ngữ + nhân vật + thế giới + quy tắc văn phong
+
+AI dịch chương truyện
+
+Kiểm tra thuật ngữ sai, thiếu hoặc chưa thống nhất
+
+Sau mỗi chương, AI có thể đề xuất thuật ngữ mới, nhưng chỉ nên đưa vào trạng thái `draft` cho đến khi được xác nhận. Cách này tránh việc AI tự suy đoán một bản dịch sai rồi áp dụng sai đó xuyên suốt tác phẩm.
+
+## 6. Nên ưu tiên những trường dữ liệu nào?
+
+Nếu bắt đầu xây dựng ngay, tôi khuyên bạn dùng 10 cột cốt lõi trước:
+
+CẤU TRÚC ĐỀ XUẤT
+
+Có thể sao chép làm tiêu đề CSV hoặc Excel
+
+&#x20;Sao chép
+
+`term_id, source_zh, target_vi, category, genre, definition, usage_condition, aliases, scope, status`
+
+Khi hệ thống lớn dần, hãy bổ sung `forbidden_translations`, `priority`, `first_chapter`, `last_updated` và các trường dành cho quan hệ nhân vật.
+
+### Kết luận
+
+Với mục tiêu dịch nhiều thể loại truyện chữ Trung Quốc bằng AI, kiến trúc phù hợp là:
+
+14 nhóm thuật ngữ + 16 trường dữ liệu + 3 cấp phạm vi + 4 cơ sở dữ liệu chuyên biệt.
+
+Phần quan trọng nhất không phải có thật nhiều thuật ngữ, mà là mỗi thuật ngữ phải cho AI biết đó là gì, dịch thế nào, dùng trong trường hợp nào và khi nào không được áp dụng.
+
+Tôi muốn hỏi thêm một điểm để định hướng kiến trúc cho đúng: Bạn đang dùng AI theo cách nào?
+
+Dịch trực tiếp bằng ChatGPT, Claude, Gemini (dán văn bản và prompt)
+
+Dịch tự động bằng API, Python hoặc phần mềm tự xây dựng
+
+Dùng nền tảng/phần mềm dịch truyện có sẵn
+
+Tiếp tục thiết kế bảng thuật ngữ&#x20;

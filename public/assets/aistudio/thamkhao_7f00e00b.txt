@@ -1,0 +1,506 @@
+# Thiết kế hệ thống Termbase cho AI dịch truyện Trung Quốc
+
+Mục tiêu: Xây dựng một cơ sở dữ liệu thuật ngữ có thể sử dụng lâu dài trong hệ thống dịch truyện chữ Trung Quốc → tiếng Việt bằng Python và API của các mô hình AI.
+
+Tôi đề xuất kiến trúc Termbase + Rule Engine + Context Retrieval + Translation Validator, phù hợp với hệ thống dịch tự động hàng nghìn chương, nhiều tác phẩm và nhiều thể loại.
+
+## 1. Kiến trúc tổng thể
+
+Truyện gốc tiếng Trung
+
+Tác phẩm • Chương • Nội dung
+
+Term Matcher
+
+Tìm tất cả thuật ngữ xuất hiện trong chương
+
+Termbase & Rule Engine
+
+Glossary
+
+Thuật ngữ
+
+Scope Rules
+
+Quy tắc ưu tiên
+
+Character DB
+
+Nhân vật
+
+World Bible
+
+Thiết lập thế giới
+
+Context Builder
+
+Chỉ chọn các thuật ngữ, quy tắc và thông tin thực sự liên quan
+
+Translation API
+
+Translation Validator
+
+Kiểm tra thuật ngữ, xưng hô, tính nhất quán; tạo đề xuất mục từ mới
+
+Hệ thống nên áp dụng 5 nguyên tắc:
+
+1. Một thuật ngữ có thể có nhiều nghĩa. Mỗi nghĩa được định danh riêng.
+2. Một nghĩa có thể có nhiều cách viết tiếng Trung. Chẳng hạn giản thể, phồn thể, tên viết tắt và biệt danh.
+3. Một nghĩa có thể có nhiều bản dịch tiếng Việt. Việc lựa chọn phụ thuộc vào truyện, thể loại và ngữ cảnh.
+4. Thuật ngữ có hiệu lực theo thời điểm trong truyện. Ví dụ nhân vật thay đổi danh hiệu ở chương 500.
+5. AI không được tự ý sửa dữ liệu đã duyệt. Thuật ngữ mới phải được kiểm tra trước khi đưa vào hệ thống chính thức.
+
+Về mô hình dữ liệu, có thể tham khảo cách tổ chức thông tin theo khái niệm của tiêu chuẩn TermBase eXchange (TBX), ISO 30042:2019. Tuy nhiên, schema dưới đây được tùy biến cho tiểu thuyết Trung Quốc, không phải triển khai TBX nguyên bản.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.iso.org\&sz=32)
+
+TermBase eXchange (TBX)
+
+
+
+## 2. Thiết kế database: 5 bảng cốt lõi
+
+Tôi khuyên dùng SQLite ở giai đoạn đầu, sau đó chuyển sang PostgreSQL nếu cần nhiều tiến trình ghi đồng thời, nhiều người biên tập hoặc quản lý quy mô lớn.
+
+| Bảng          | Chức năng                                                |
+| ------------- | -------------------------------------------------------- |
+| `works`       | Thông tin tác phẩm                                       |
+| `work_genres` | Một tác phẩm có thể thuộc nhiều thể loại                 |
+| `terms`       | Danh sách khái niệm và ý nghĩa của thuật ngữ             |
+| `term_forms`  | Các cách viết tiếng Trung của cùng một thuật ngữ         |
+| `term_rules`  | Cách dịch tiếng Việt, phạm vi áp dụng và quy tắc ưu tiên |
+
+Điểm khác biệt quan trọng: không lưu toàn bộ dữ liệu trong một bảng duy nhất. Việc tách thuật ngữ, biến thể và quy tắc dịch giúp xử lý đa nghĩa và đa tác phẩm mà không phải sao chép dữ liệu liên tục.
+
+### 2.1. Schema SQLite đề xuất
+
+Dưới đây là schema SQL có thể sử dụng trực tiếp với `sqlite3` trong Python. Tôi đã kiểm tra cú pháp và truy vấn mẫu trên SQLite.
+
+```
+
+PRAGMA foreign_keys = ON;
+
+-- 1. Tác phẩm
+CREATE TABLE works (
+    id TEXT PRIMARY KEY,
+    title_zh TEXT NOT NULL
+);
+
+-- 2. Thể loại của tác phẩm
+CREATE TABLE work_genres (
+    work_id TEXT NOT NULL REFERENCES works(id),
+    genre TEXT NOT NULL,
+    PRIMARY KEY (work_id, genre)
+);
+
+-- 3. Khái niệm thuật ngữ
+CREATE TABLE terms (
+    id TEXT PRIMARY KEY,
+    headword_zh TEXT NOT NULL,
+    sense_label TEXT NOT NULL,
+    category TEXT NOT NULL,
+    subcategory TEXT,
+    definition_vi TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'draft'
+      CHECK (status IN (
+        'draft', 'approved', 'deprecated'
+      ))
+);
+
+-- 4. Biến thể tiếng Trung
+CREATE TABLE term_forms (
+    id INTEGER PRIMARY KEY,
+    term_id TEXT NOT NULL REFERENCES terms(id),
+    form_zh TEXT NOT NULL,
+    form_key TEXT NOT NULL,
+    form_kind TEXT NOT NULL DEFAULT 'canonical'
+      CHECK (form_kind IN (
+        'canonical', 'simplified', 'traditional',
+        'alias', 'nickname'
+      )),
+    match_mode TEXT NOT NULL DEFAULT 'exact'
+      CHECK (match_mode IN ('exact', 'contextual')),
+    UNIQUE (term_id, form_key)
+);
+
+CREATE INDEX idx_term_forms_key
+ON term_forms(form_key);
+
+-- 5. Quy tắc chọn bản dịch
+CREATE TABLE term_rules (
+    id TEXT PRIMARY KEY,
+    term_id TEXT NOT NULL REFERENCES terms(id),
+
+    scope TEXT NOT NULL
+      CHECK (scope IN ('global', 'genre', 'work')),
+    genre TEXT,
+    work_id TEXT REFERENCES works(id),
+
+    chapter_from INTEGER NOT NULL DEFAULT 1
+      CHECK (chapter_from >= 1),
+    chapter_to INTEGER,
+
+    translation_vi TEXT NOT NULL,
+    policy TEXT NOT NULL
+      CHECK (policy IN (
+        'force', 'prefer',
+        'contextual', 'keep_source'
+      )),
+
+    when_context TEXT,
+    avoid_context TEXT,
+    forbidden_vi_json TEXT NOT NULL DEFAULT '[]',
+
+    priority INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'draft'
+      CHECK (status IN (
+        'draft', 'approved', 'deprecated'
+      )),
+    revision INTEGER NOT NULL DEFAULT 1
+      CHECK (revision >= 1),
+
+    CHECK (
+      chapter_to IS NULL
+      OR chapter_to >= chapter_from
+    ),
+
+    CHECK (
+      (scope = 'global'
+       AND genre IS NULL AND work_id IS NULL)
+      OR
+      (scope = 'genre'
+       AND genre IS NOT NULL AND work_id IS NULL)
+      OR
+      (scope = 'work'
+       AND work_id IS NOT NULL AND genre IS NULL)
+    )
+);
+
+CREATE INDEX idx_term_rules_lookup
+ON term_rules(
+    term_id, status, scope,
+    work_id, genre, chapter_from, chapter_to
+);
+
+```
+
+### 2.2. Tại sao phải tách `terms` và `term_rules`?
+
+Ví dụ thuật ngữ `金丹`:
+
+| Bảng         | Dữ liệu                                                              |
+| ------------ | -------------------------------------------------------------------- |
+| `terms`      | `金丹` — một khái niệm tu luyện                                        |
+| `term_forms` | `金丹` — cách viết tiếng Trung                                         |
+| `term_rules` | Toàn cục → Kim Đan                                                   |
+| `term_rules` | Truyện A → Kim Đan                                                   |
+| `term_rules` | Truyện B → cách gọi riêng theo thiết lập tác phẩm, nếu được xác nhận |
+
+Không phải tạo nhiều bản sao của khái niệm chỉ để thay đổi bản dịch.
+
+Đối với trường hợp `小姐` có thể mang những nghĩa khác nhau, hãy tạo hai `terms.id` khác nhau, vì đây là hai nghĩa cần phân biệt.
+
+Lưu ý: `term_forms` chỉ nên gộp những cách viết có thể dùng cùng một quy tắc dịch. Nếu một nhân vật có tên đầy đủ và biệt danh cần dịch khác nhau, hãy tạo các mục từ riêng và liên kết chúng với cùng một nhân vật trong Character Database.
+
+## 3. Cơ chế ưu tiên thuật ngữ
+
+Tôi đề xuất phân biệt ưu tiên phạm vi và chính sách bắt buộc dịch. Hai yếu tố này không nên gộp thành một con số duy nhất.
+
+### 3.1. Thứ tự ưu tiên phạm vi
+
+1\. Work Scope
+
+Quy tắc riêng của tác phẩm
+
+2\. Genre Scope
+
+Quy tắc của thể loại
+
+3\. Global Scope
+
+Quy tắc dùng chung
+
+Ví dụ truyện A có quy định riêng:
+
+- Toàn cục: `大道` → đại đạo.
+- Thể loại tiên hiệp: `大道` → Đại Đạo khi chỉ khái niệm siêu hình cụ thể.
+- Riêng truyện A: `大道` → Đạo Lớn, nếu đây là thuật ngữ cố định đã được tác giả xác lập.
+
+Khi dịch truyện A, quy tắc riêng của truyện sẽ được ưu tiên nếu phù hợp ngữ cảnh.
+
+### 3.2. Chính sách xử lý bản dịch
+
+| `policy`      | Ý nghĩa             | Xử lý                                      |
+| ------------- | ------------------- | ------------------------------------------ |
+| `force`       | Bản dịch cố định    | Bắt buộc nếu đúng nghĩa và ngữ cảnh        |
+| `prefer`      | Bản dịch ưu tiên    | Dùng mặc định, có thể điều chỉnh văn phong |
+| `contextual`  | Phụ thuộc ngữ cảnh  | Phải xác định nghĩa trước khi áp dụng      |
+| `keep_source` | Giữ nguyên dạng gốc | Không chuyển sang cách dịch khác           |
+
+Ví dụ:
+
+- `叶辰` → Diệp Thần: `force`
+- `灵气` → linh khí: `prefer`
+- `小姐` → tiểu thư/cô: `contextual`
+- Mã hệ thống `[SSS]`: `keep_source`
+
+### 3.3. Thuật toán phân giải xung đột
+
+Tôi đề xuất áp dụng thứ tự sau:
+
+1. Lọc trạng thái: chỉ sử dụng `approved` ở cả khái niệm và quy tắc.
+2. Lọc phạm vi: chỉ giữ quy tắc hợp lệ với tác phẩm, thể loại và chương hiện tại.
+3. Kiểm tra nghĩa: loại các quy tắc mâu thuẫn với ngữ cảnh đã xác định.
+4. So sánh phạm vi: `work` cao hơn `genre`, cao hơn `global`.
+5. So sánh độ cụ thể: ưu tiên quy tắc có điều kiện ngữ cảnh xác thực và phạm vi chương cụ thể.
+6. So sánh `priority`: chỉ dùng để phân giải giữa các quy tắc vẫn tương đương về phạm vi và điều kiện.
+7. Xử lý xung đột: nếu còn nhiều bản dịch được duyệt, mâu thuẫn và không thể phân giải, đánh dấu `ambiguous` thay vì chọn tùy tiện.
+
+Điểm cần đặc biệt chú ý: `priority` không nên cho phép một thuật ngữ toàn cục ghi đè quy tắc riêng đã duyệt của tác phẩm. Ngoài ra, `when_context` và `avoid_context` là mô tả ngữ nghĩa; chúng không tự động trở thành điều kiện boolean nếu bạn chưa xây dựng bộ phân loại ngữ cảnh.
+
+## 4. Cơ chế tìm thuật ngữ trong văn bản tiếng Trung
+
+Đối với hàng nghìn hoặc hàng chục nghìn thuật ngữ, tôi khuyên sử dụng Aho–Corasick để phát hiện chuỗi tiếng Trung.
+
+Thư viện Python `pyahocorasick` có thể tìm nhiều mẫu chuỗi trong một lượt quét và trả về vị trí xuất hiện của từng mẫu.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://pyahocorasick.readthedocs.io\&sz=32)
+
+ahocorasick documentation
+
+
+
+### 4.1. Triển khai bằng Python
+
+Cài đặt:
+
+```
+pip install pyahocorasick
+```
+
+Ví dụ bộ nhận diện cơ bản:
+
+```
+import ahocorasickfrom collections import defaultdictdef build_matcher(term_forms):    """    term_forms:    [        ("青云宗", "term_001"),        ("青雲宗", "term_001"),        ("小姐", "term_002"),        ("小姐", "term_003")    ]    """    lookup = defaultdict(set)    for source, term_id in term_forms:        lookup[source].add(term_id)    matcher = ahocorasick.Automaton()    for source, term_ids in lookup.items():        matcher.add_word(            source,            (source, tuple(sorted(term_ids)))        )    matcher.make_automaton()    return matcherdef find_terms(text, matcher):    matches = []    for end, (source, term_ids) in matcher.iter(text):
+```
+
+Đoạn code này thực hiện phát hiện ứng viên, chưa tự chọn nghĩa hoặc bản dịch. Điều đó là có chủ đích: một bề mặt như `小姐` có thể trỏ tới nhiều `term_id`.
+
+### 4.2. Xử lý thuật ngữ lồng nhau
+
+Giả sử có:
+
+| Thuật ngữ | Dịch                    |
+| --------- | ----------------------- |
+| 天道        | Thiên Đạo               |
+| 天道宗       | Thiên Đạo Tông          |
+| 天道宗主      | Tông chủ Thiên Đạo Tông |
+
+Nếu văn bản xuất hiện `天道宗主`, không nên thay lần lượt `天道`, rồi `天道宗`.
+
+Tôi khuyên:
+
+1. Thu thập toàn bộ kết quả trùng khớp, kể cả kết quả chồng lấn.
+2. Kiểm tra phạm vi và điều kiện hợp lệ.
+3. Ưu tiên mẫu dài nhất tại cùng vị trí bắt đầu khi đó là một thuật ngữ hoàn chỉnh.
+4. Giữ thông tin các mẫu ngắn hơn để phân tích nếu mẫu dài không phù hợp.
+5. Không thay chuỗi trực tiếp trên văn bản gốc trước khi dịch.
+
+Lưu ý thuật toán longest match chỉ giải quyết sự chồng lấn chuỗi, không giải quyết đa nghĩa. Các thuật ngữ một chữ hoặc hai chữ có tính thông dụng cao nên có quy tắc ngữ cảnh/boundary riêng.
+
+### 4.3. Chuẩn hóa tiếng Trung
+
+Nên lưu nguyên văn dạng gốc và một `form_key` chuẩn hóa:
+
+- Unicode NFC để nhất quán biểu diễn văn bản.
+- Biến thể giản thể/phồn thể đã xác nhận.
+- Tên viết tắt hoặc biến thể thực sự đồng nghĩa.
+
+Có thể sử dụng [OpenCC](https://github.com/BYVoid/OpenCC?utm_source=chatgpt.com) để hỗ trợ xử lý giản thể và phồn thể.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub
+
+&#x20;Tuy nhiên, không nên tự động coi mọi kết quả chuyển đổi là cùng một thuật ngữ, nhất là tên riêng.
+
+
+
+Unicode cũng lưu ý rằng NFKC có thể loại bỏ những khác biệt tương thích; vì vậy NFC là lựa chọn nền tảng an toàn hơn cho văn bản truyện, còn việc chuyển đổi khác nên là bước có kiểm soát.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.unicode.org\&sz=32)
+
+Normalization
+
+
+
+## 5. Truy vấn các quy tắc áp dụng cho một chương
+
+Sau khi Term Matcher xác định được các `term_id`, hệ thống truy vấn `term_rules` bằng `work_id` và `chapter_number`.
+
+Ví dụ truy vấn một thuật ngữ:
+
+```
+
+SELECT
+    r.*,
+    t.headword_zh,
+    t.category,
+    t.definition_vi
+FROM term_rules AS r
+JOIN terms AS t
+    ON t.id = r.term_id
+WHERE
+    t.status = 'approved'
+    AND r.status = 'approved'
+    AND r.term_id = :term_id
+    AND r.chapter_from <= :chapter
+    AND (
+        r.chapter_to IS NULL
+        OR r.chapter_to >= :chapter
+    )
+    AND (
+        r.scope = 'global'
+        OR (
+            r.scope = 'genre'
+            AND EXISTS (
+                SELECT 1
+                FROM work_genres AS wg
+                WHERE wg.work_id = :work_id
+                AND wg.genre = r.genre
+            )
+        )
+        OR (
+            r.scope = 'work'
+            AND r.work_id = :work_id
+        )
+    );
+
+```
+
+Truy vấn này trả về các quy tắc hợp lệ. Python tiếp tục áp dụng thuật toán ưu tiên ở mục 3, chứ không chọn ngay dòng đầu tiên.
+
+Khi triển khai thực tế, nên truy vấn hàng loạt các `term_id` tìm được trong một chương để hạn chế số lần đọc database.
+
+## 6. Dữ liệu nên gửi vào API dịch truyện
+
+Một lỗi thường gặp là gửi toàn bộ termbase vào prompt. Tôi khuyên chỉ gửi các mục từ thực sự xuất hiện trong đoạn cần dịch, cộng với một lượng nhỏ thông tin ngữ cảnh cần thiết.
+
+Ví dụ cấu trúc JSON:
+
+```
+
+{
+  "work_id": "novel_001",
+  "chapter": 128,
+  "target_language": "vi",
+
+  "fixed_terms": [
+    {
+      "source": "叶辰",
+      "target": "Diệp Thần",
+      "category": "character",
+      "policy": "force"
+    },
+    {
+      "source": "青云宗",
+      "target": "Thanh Vân Tông",
+      "category": "organization",
+      "policy": "force",
+      "forbidden": [
+        "Thanh Vân Môn"
+      ]
+    }
+  ],
+
+  "contextual_terms": [
+    {
+      "source": "小姐",
+      "options": [
+        {
+          "target": "tiểu thư",
+          "when": "Vai vế trong gia tộc cổ đại"
+        },
+        {
+          "target": "cô",
+          "when": "Cách gọi trong đời sống hiện đại"
+        }
+      ]
+    }
+  ],
+
+  "translation_rules": [
+    "Giữ nguyên các tên riêng đã duyệt.",
+    "Chỉ áp dụng thuật ngữ khi đúng nghĩa.",
+    "Không tự ý thay đổi hệ thống cảnh giới.",
+    "Ưu tiên văn phong tiếng Việt tự nhiên."
+  ]
+}
+
+```
+
+Đây là gói dữ liệu nội bộ do Python xây dựng trước khi gọi API, không phải định dạng bắt buộc của một nhà cung cấp AI.
+
+Phần chứa văn bản gốc được gửi kèm theo gói này. Tùy API, bạn có thể đặt hướng dẫn ở phần system/developer và đưa văn bản cần dịch vào phần user.
+
+## 7. Kiểm tra sau khi AI dịch
+
+Nên triển khai Translation Validator với ba mức xử lý:
+
+| Mức          | Kiểm tra                                                                         | Hành động                   |
+| ------------ | -------------------------------------------------------------------------------- | --------------------------- |
+| Lỗi bắt buộc | Tên nhân vật bị đổi, thuật ngữ `force` không được tuân thủ trong ngữ cảnh hợp lệ | Đánh dấu lỗi và yêu cầu sửa |
+| Cảnh báo     | Thuật ngữ `prefer` khác bản chuẩn; bản dịch có nguy cơ không thống nhất          | Kiểm tra ngữ cảnh           |
+| Đề xuất      | Thuật ngữ mới, danh hiệu mới, cách xưng hô mới                                   | Ghi vào hàng chờ duyệt      |
+
+Không nên dùng một phép tìm kiếm chuỗi đơn giản để quyết định mọi lỗi: một thuật ngữ có thể xuất hiện nhiều lần, nằm trong tên dài hơn, hoặc có dạng diễn đạt được phép biến đổi.
+
+Tôi khuyên bổ sung nhật ký dịch với các trường `work_id`, `chapter`, `term_id`, `rule_id`, `rule_revision`, `output_vi`, `validation_result`. Nhờ vậy, khi sửa một quy tắc, bạn có thể tìm các chương đã áp dụng bản cũ để dịch lại hoặc kiểm tra.
+
+## 8. Cách phân bổ thuật ngữ vào các nhóm dữ liệu
+
+Với 14 nhóm thuật ngữ đã xác định trước đó, có thể chia theo cách xử lý thực tế:
+
+| Nhóm                                           | Phương pháp áp dụng                            |
+| ---------------------------------------------- | ---------------------------------------------- |
+| Tên nhân vật, địa danh, tông môn               | Chủ yếu `force`                                |
+| Tên công pháp, cảnh giới, vật phẩm đặc thù     | `force` nếu đã duyệt                           |
+| Linh khí, chân khí, võ học, thuật ngữ phổ biến | `prefer`                                       |
+| Xưng hô, kính ngữ, chức danh                   | `contextual`                                   |
+| Thành ngữ, tiếng lóng, điển cố                 | `contextual`                                   |
+| Thuật ngữ chuyên ngành                         | `prefer` hoặc `force` tùy độ chính xác yêu cầu |
+| Mã hệ thống, ký hiệu đặc biệt                  | `keep_source` khi cần                          |
+
+Ngoài ra, hãy quản lý quan hệ nhân vật, sơ đồ cảnh giới và quy tắc thế giới trong những cơ sở dữ liệu riêng, không nhồi tất cả vào `term_rules`.
+
+## 9. Lộ trình triển khai tôi đề xuất
+
+Giai đoạn 1 — Termbase tối thiểu
+
+SQLite, 5 bảng cốt lõi, thuật ngữ dùng chung và thuật ngữ riêng từng tác phẩm. Hỗ trợ nhập CSV/JSON và duyệt thuật ngữ.
+
+Giai đoạn 2 — Term Matcher & Rule Engine
+
+Aho–Corasick, tra cứu theo truyện/chương, xử lý chồng lấn và đa nghĩa, tạo gói thuật ngữ cho API.
+
+Giai đoạn 3 — Character & World Database
+
+Theo dõi thân phận, quan hệ nhân vật, hệ thống tu luyện, lịch sử thay đổi danh hiệu và xưng hô theo chương.
+
+Giai đoạn 4 — Validation & Learning Loop
+
+Kiểm tra tính nhất quán, ghi nhận lỗi, đề xuất thuật ngữ mới và quản lý phiên bản các quy tắc đã duyệt.
+
+### Các quyết định kiến trúc quan trọng
+
+Tôi khuyên giữ SQLite làm nguồn dữ liệu chuẩn, Aho–Corasick làm bộ phát hiện, Python Rule Engine làm bộ chọn quy tắc và LLM làm bộ dịch/ngữ nghĩa.
+
+Không nên sử dụng vector database làm cơ chế tìm kiếm chính cho tên riêng và thuật ngữ chính xác. Vector search có thể hỗ trợ truy hồi định nghĩa hoặc ngữ cảnh, nhưng không thay thế được đối chiếu chuỗi và quy tắc ưu tiên có tính xác định.
+
+Về lâu dài, hai phần đáng đầu tư nhất là:
+
+1\. Contextual Terminology: giúp cùng một từ được dịch đúng trong nhiều bối cảnh và thể loại.
+
+2\. Temporal Terminology: giúp hệ thống hiểu thuật ngữ, quan hệ và danh hiệu nào có hiệu lực tại chương đang dịch, tránh áp dụng thông tin của các chương tương lai.
+
+Hai phần này sẽ quyết định phần lớn tính nhất quán khi bạn dịch những bộ truyện dài hàng nghìn chương.

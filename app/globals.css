@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: var(--font-be-vietnam), var(--font-inter), var(--font-roboto), system-ui, sans-serif;
+  --font-serif: var(--font-noto-serif), var(--font-lora), var(--font-literata), serif;
+  --font-mono: var(--font-mono), monospace;
+}
+
+@layer base {
+  .font-display {
+    font-family: var(--font-be-vietnam), var(--font-inter), sans-serif;
+  }
+  .font-sans-ui {
+    font-family: var(--font-be-vietnam), var(--font-inter), system-ui, sans-serif;
+  }
+  .font-mono-num {
+    font-family: var(--font-mono), monospace;
+    font-variant-numeric: tabular-nums;
+  }
+  .prose-justify {
+    text-align: justify;
+    text-justify: inter-word;
+  }
+}
